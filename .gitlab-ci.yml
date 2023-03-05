@@ -1,0 +1,48 @@
+stages:
+  - build
+  - deploy
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t mustafasayilgan/vanillappgit:$CI_COMMIT_SHA .
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker push mustafasayilgan/vanillappgit:$CI_COMMIT_SHA
+deploy:
+  stage: deploy
+  image: google/cloud-sdk:latest
+  script:
+    # Connect to the bastion host using gcloud.
+    - gcloud auth login
+    - gcloud compute ssh app-cluster-bastion --project terraform-test-308408 --zone europe-west1-b -- -L8888:127.0.0.1:8888 -f tail -f /dev/null
+    - alias kube='HTTPS_PROXY=localhost:8888 kubectl'
+    # Connect to the Kubernetes cluster using kubectl.
+    - kube config set-cluster app-cluster --server=https://127.0.0.1:8080 --insecure-skip-tls-verify
+    - kube config set-credentials gke_terraform-test-308408_europe-west1_app-cluster --token=$KUBECONFIG_TOKEN
+    - kube config set-context gke_terraform-test-308408_europe-west1_app-cluster --cluster=app-cluster --user=gke_terraform-test-308408_europe-west1_app-cluster
+    - kubec config use-context gke_terraform-test-308408_europe-west1_app-cluster
+    - kube apply -f vanilla.yaml
+    - kube apply -f vanilla-ingress.yaml    
+  environment:
+    name: production
+  only:
+    - master
+
+
+
+# deploy:
+#   stage: deploy
+#   image: bitnami/kubectl:latest
+#   script:
+#     - kubectl config set-cluster my-cluster --server=https://my-cluster-api-url --certificate-authority=my-cluster-ca.crt
+#     - kubectl config set-credentials my-user --token=$KUBECONFIG_TOKEN
+#     - kubectl config set-context my-context --cluster=my-cluster --user=my-user
+#     - kubectl config use-context my-context
+#     - kubectl apply -f deployment.yaml
+#   environment:
+#     name: production
+#   only:
+#     - master
